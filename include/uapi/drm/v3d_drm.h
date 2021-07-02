@@ -49,7 +49,19 @@ extern "C" {
 #define DRM_IOCTL_V3D_SUBMIT_CSD          DRM_IOW(DRM_COMMAND_BASE + DRM_V3D_SUBMIT_CSD, struct drm_v3d_submit_csd)
 
 #define DRM_V3D_SUBMIT_CL_FLUSH_CACHE             0x01
+#define DRM_V3D_SUBMIT_EXTENSION		  0x02
 
+/* struct drm_v3d_extension - ioctl extensions
+ *
+ * Linked-list of generic extensions where the id identify which struct is
+ * pointed by ext_data. Therefore, DRM_V3D_EXT_ID_* is used on id to identify
+ * the extension type.
+ */
+struct drm_v3d_extension {
+	__u64 next;
+	__u64 ext_data;
+	__u32 id;
+};
 /**
  * struct drm_v3d_submit_cl - ioctl argument for submitting commands to the 3D
  * engine.
@@ -126,7 +138,14 @@ struct drm_v3d_submit_cl {
 	/* Number of BO handles passed in (size is that times 4). */
 	__u32 bo_handle_count;
 
+	/* DRM_V3D_SUBMIT_* properties */
 	__u32 flags;
+
+	/* Pointer to an array of ioctl extensions*/
+	__u64 extensions;
+
+	/* Number of extensions*/
+	__u32 extension_count;
 };
 
 /**
@@ -233,6 +252,15 @@ struct drm_v3d_submit_tfu {
 	__u32 in_sync;
 	/* Sync object to signal when the TFU job is done. */
 	__u32 out_sync;
+
+	/* Number of extensions*/
+	__u32 extension_count;
+
+	/* Pointer to an array of ioctl extensions*/
+	__u64 extensions;
+
+	__u32 flags;
+
 };
 
 /* Submits a compute shader for dispatch.  This job will block on any
@@ -258,6 +286,14 @@ struct drm_v3d_submit_csd {
 	__u32 in_sync;
 	/* Sync object to signal when the CSD job is done. */
 	__u32 out_sync;
+
+	/* Number of extensions*/
+	__u32 extension_count;
+
+	/* Pointer to an array of ioctl extensions*/
+	__u64 extensions;
+
+	__u32 flags;
 };
 
 #if defined(__cplusplus)
