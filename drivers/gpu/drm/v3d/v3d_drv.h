@@ -260,6 +260,10 @@ struct v3d_csd_job {
 
 struct v3d_submit_outsync {
 	struct drm_syncobj *handle;
+
+	u64 point;
+
+	struct dma_fence_chain *chain;
 };
 
 struct v3d_submit_ext {

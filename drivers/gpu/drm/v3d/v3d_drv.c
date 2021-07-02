@@ -194,7 +194,8 @@ static const struct drm_ioctl_desc v3d_drm_ioctls[] = {
 static const struct drm_driver v3d_drm_driver = {
 	.driver_features = (DRIVER_GEM |
 			    DRIVER_RENDER |
-			    DRIVER_SYNCOBJ),
+			    DRIVER_SYNCOBJ |
+			    DRIVER_SYNCOBJ_TIMELINE),
 
 	.open = v3d_open,
 	.postclose = v3d_postclose,

@@ -517,7 +517,7 @@ v3d_job_init(struct v3d_dev *v3d, struct drm_file *file_priv,
 				goto fail;
 			}
 
-			ret = v3d_job_wait_deps(file_priv, job, in.handle, 0);
+			ret = v3d_job_wait_deps(file_priv, job, in.handle, in.point);
 			if (ret)
 				goto fail;
 		}
@@ -578,9 +578,17 @@ v3d_attach_fences_and_unlock_reservation(struct drm_file *file_priv,
 	/* If multisync extension */
 	if (se && se->out_sync_count) {
 		for (i = 0; i < se->out_sync_count; i++) {
-			drm_syncobj_replace_fence(se->out_syncs[i].handle,
-						  done_fence);
-			drm_syncobj_put(se->out_syncs[i].handle);
+			if (se->out_syncs[i].chain) {
+				drm_syncobj_add_point(se->out_syncs[i].handle,
+						      se->out_syncs[i].chain,
+						      done_fence,
+						      se->out_syncs[i].point);
+				kfree(se->out_syncs[i].chain);
+			} else {
+				drm_syncobj_replace_fence(se->out_syncs[i].handle,
+							  done_fence);
+			}
+		drm_syncobj_put(se->out_syncs[i].handle);
 		}
 		kvfree(se->out_syncs);
 		return;
@@ -627,6 +635,18 @@ v3d_get_post_deps(struct drm_file *file_priv,
 			pr_info("fail to find handle\n");
 			goto fail;
 		}
+
+		if (!out.point)
+			continue;
+
+		se->out_syncs[i].point = out.point;
+		se->out_syncs[i].chain = kmalloc(sizeof(*se->out_syncs[i].chain),
+							GFP_KERNEL);
+		if (!se->out_syncs[i].chain) {
+			i++;
+			ret = -ENOMEM;
+			goto fail;
+		}
 	}
 	se->out_sync_count = count;
 
@@ -634,6 +654,8 @@ v3d_get_post_deps(struct drm_file *file_priv,
 
 fail:
 	for (; i > 0; --i) {
+		if(se->out_syncs[i].chain)
+			kfree(se->out_syncs[i].chain);
 		drm_syncobj_put(se->out_syncs[i].handle);
 	}
 	kvfree(se->out_syncs);
