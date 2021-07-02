@@ -113,7 +113,6 @@ static int v3d_get_param_ioctl(struct drm_device *dev, void *data,
 		return 0;
 	}
 
-
 	switch (args->param) {
 	case DRM_V3D_PARAM_SUPPORTS_TFU:
 		args->value = 1;
@@ -177,7 +176,7 @@ v3d_postclose(struct drm_device *dev, struct drm_file *file)
 DEFINE_DRM_GEM_FOPS(v3d_drm_fops);
 
 /* DRM_AUTH is required on SUBMIT_CL for now, while we don't have GMP
- * protection between clients.  Note that render nodes would be be
+ * protection between clients.  Note that render nodes would be
  * able to submit CLs that could access BOs from clients authenticated
  * with the master node.  The TFU doesn't use the GMP, so it would
  * need to stay DRM_AUTH until we do buffer size/offset validation.
@@ -250,7 +249,6 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 	u32 mmu_debug;
 	u32 ident1;
 
-
 	v3d = devm_drm_dev_alloc(dev, &v3d_drm_driver, struct v3d_dev, drm);
 	if (IS_ERR(v3d))
 		return PTR_ERR(v3d);
@@ -321,7 +319,6 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to allocate MMU scratch page\n");
 		return -ENOMEM;
 	}
-
 
 	ret = v3d_gem_init(drm);
 	if (ret)
