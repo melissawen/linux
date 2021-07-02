@@ -473,11 +473,24 @@ v3d_wait_bo_ioctl(struct drm_device *dev, void *data,
 }
 
 static int
+v3d_job_wait_deps(struct drm_file *file_priv, struct v3d_job *job,
+		     u32 in_sync, u32 point)
+{
+	struct dma_fence *in_fence = NULL;
+	int ret;
+
+	ret = drm_syncobj_find_fence(file_priv, in_sync, point, 0, &in_fence);
+	if (ret == -EINVAL)
+		return ret;
+
+	return drm_gem_fence_array_add(&job->deps, in_fence);
+}
+
+static int
 v3d_job_init(struct v3d_dev *v3d, struct drm_file *file_priv,
 	     struct v3d_job *job, void (*free)(struct kref *ref),
 	     u32 in_sync)
 {
-	struct dma_fence *in_fence = NULL;
 	int ret;
 
 	job->v3d = v3d;
@@ -485,11 +498,7 @@ v3d_job_init(struct v3d_dev *v3d, struct drm_file *file_priv,
 
 	xa_init_flags(&job->deps, XA_FLAGS_ALLOC);
 
-	ret = drm_syncobj_find_fence(file_priv, in_sync, 0, 0, &in_fence);
-	if (ret == -EINVAL)
-		goto fail;
-
-	ret = drm_gem_fence_array_add(&job->deps, in_fence);
+	ret = v3d_job_wait_deps(file_priv, job, in_sync, 0);
 	if (ret)
 		goto fail;
 
