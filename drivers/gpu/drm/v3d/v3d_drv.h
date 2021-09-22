@@ -257,6 +257,8 @@ struct v3d_job {
 	void (*free)(struct kref *ref);
 };
 
+#define v3d_job_ptr(job) ((struct v3d_job *)(void *)job)
+
 struct v3d_bin_job {
 	struct v3d_job base;
 

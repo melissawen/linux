@@ -59,7 +59,6 @@ v3d_clock_up_put(struct v3d_dev *v3d)
 	mutex_unlock(&v3d->clk_lock);
 }
 
-
 static void
 v3d_init_core(struct v3d_dev *v3d, int core)
 {
@@ -434,6 +433,9 @@ v3d_render_job_free(struct kref *ref)
 
 void v3d_job_cleanup(struct v3d_job *job)
 {
+	if (!job)
+		return;
+
 	drm_sched_job_cleanup(&job->base);
 	v3d_job_put(job);
 }
@@ -492,11 +494,20 @@ v3d_job_add_deps(struct drm_file *file_priv, struct v3d_job *job,
 
 static int
 v3d_job_init(struct v3d_dev *v3d, struct drm_file *file_priv,
-	     struct v3d_job *job, void (*free)(struct kref *ref),
+	     void **container, size_t size, void (*free)(struct kref *ref),
 	     u32 in_sync, enum v3d_queue queue)
 {
 	struct v3d_file_priv *v3d_priv = file_priv->driver_priv;
+	struct v3d_job *job;
 	int ret;
+
+	*container = kcalloc(1, size, GFP_KERNEL);
+	if (!*container) {
+		DRM_ERROR("Cannot allocate memory for v3d job.");
+		return -ENOMEM;
+	}
+
+	job = v3d_job_ptr(*container);
 
 	job->v3d = v3d;
 	job->free = free;
@@ -518,8 +529,11 @@ v3d_job_init(struct v3d_dev *v3d, struct drm_file *file_priv,
 fail_job:
 	drm_sched_job_cleanup(&job->base);
 fail:
+	kfree(*container);
+	*container = NULL;
+
 	return ret;
-}
+};
 
 static void
 v3d_push_job(struct v3d_job *job)
@@ -597,35 +611,20 @@ v3d_submit_cl_ioctl(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 
-	render = kcalloc(1, sizeof(*render), GFP_KERNEL);
-	if (!render)
-		return -ENOMEM;
+	ret = v3d_job_init(v3d, file_priv, (void *)&render, sizeof(*render),
+			   v3d_render_job_free, args->in_sync_bcl, V3D_RENDER);
+	if (ret)
+		goto fail;
 
 	render->start = args->rcl_start;
 	render->end = args->rcl_end;
 	INIT_LIST_HEAD(&render->unref_list);
 
-	ret = v3d_job_init(v3d, file_priv, &render->base,
-			   v3d_render_job_free, args->in_sync_rcl, V3D_RENDER);
-	if (ret) {
-		kfree(render);
-		return ret;
-	}
-
 	if (args->bcl_start != args->bcl_end) {
-		bin = kcalloc(1, sizeof(*bin), GFP_KERNEL);
-		if (!bin) {
-			v3d_job_cleanup(&render->base);
-			return -ENOMEM;
-		}
-
-		ret = v3d_job_init(v3d, file_priv, &bin->base,
+		ret = v3d_job_init(v3d, file_priv, (void *)&bin, sizeof(*bin),
 				   v3d_job_free, args->in_sync_bcl, V3D_BIN);
-		if (ret) {
-			v3d_job_cleanup(&render->base);
-			kfree(bin);
-			return ret;
-		}
+		if (ret)
+			goto fail;
 
 		bin->start = args->bcl_start;
 		bin->end = args->bcl_end;
@@ -636,18 +635,10 @@ v3d_submit_cl_ioctl(struct drm_device *dev, void *data,
 	}
 
 	if (args->flags & DRM_V3D_SUBMIT_CL_FLUSH_CACHE) {
-		clean_job = kcalloc(1, sizeof(*clean_job), GFP_KERNEL);
-		if (!clean_job) {
-			ret = -ENOMEM;
+		ret = v3d_job_init(v3d, file_priv, (void *)&clean_job, sizeof(*clean_job),
+				   v3d_job_free, 0, V3D_CACHE_CLEAN);
+		if (ret)
 			goto fail;
-		}
-
-		ret = v3d_job_init(v3d, file_priv, clean_job, v3d_job_free, 0, V3D_CACHE_CLEAN);
-		if (ret) {
-			kfree(clean_job);
-			clean_job = NULL;
-			goto fail;
-		}
 
 		last_job = clean_job;
 	} else {
@@ -720,11 +711,9 @@ fail_unreserve:
 	drm_gem_unlock_reservations(last_job->bo,
 				    last_job->bo_count, &acquire_ctx);
 fail:
-	if (bin)
-		v3d_job_cleanup(&bin->base);
-	v3d_job_cleanup(&render->base);
-	if (clean_job)
-		v3d_job_cleanup(clean_job);
+	v3d_job_cleanup(v3d_job_ptr(bin));
+	v3d_job_cleanup(v3d_job_ptr(render));
+	v3d_job_cleanup(clean_job);
 
 	return ret;
 }
@@ -750,22 +739,16 @@ v3d_submit_tfu_ioctl(struct drm_device *dev, void *data,
 
 	trace_v3d_submit_tfu_ioctl(&v3d->drm, args->iia);
 
-	job = kcalloc(1, sizeof(*job), GFP_KERNEL);
-	if (!job)
-		return -ENOMEM;
-
-	ret = v3d_job_init(v3d, file_priv, &job->base,
+	ret = v3d_job_init(v3d, file_priv, (void *)&job, sizeof(*job),
 			   v3d_job_free, args->in_sync, V3D_TFU);
-	if (ret) {
-		kfree(job);
-		return ret;
-	}
+	if (ret)
+		goto fail;
 
 	job->base.bo = kcalloc(ARRAY_SIZE(args->bo_handles),
 			       sizeof(*job->base.bo), GFP_KERNEL);
 	if (!job->base.bo) {
-		v3d_job_cleanup(&job->base);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail;
 	}
 
 	job->args = *args;
@@ -812,7 +795,7 @@ v3d_submit_tfu_ioctl(struct drm_device *dev, void *data,
 	return 0;
 
 fail:
-	v3d_job_cleanup(&job->base);
+	v3d_job_cleanup(v3d_job_ptr(job));
 
 	return ret;
 }
@@ -845,29 +828,15 @@ v3d_submit_csd_ioctl(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 
-	job = kcalloc(1, sizeof(*job), GFP_KERNEL);
-	if (!job)
-		return -ENOMEM;
-
-	ret = v3d_job_init(v3d, file_priv, &job->base,
+	ret = v3d_job_init(v3d, file_priv, (void *)&job, sizeof(*job),
 			   v3d_job_free, args->in_sync, V3D_CSD);
-	if (ret) {
-		kfree(job);
-		return ret;
-	}
+	if (ret)
+		goto fail;
 
-	clean_job = kcalloc(1, sizeof(*clean_job), GFP_KERNEL);
-	if (!clean_job) {
-		v3d_job_cleanup(&job->base);
-		return -ENOMEM;
-	}
-
-	ret = v3d_job_init(v3d, file_priv, clean_job, v3d_job_free, 0, V3D_CACHE_CLEAN);
-	if (ret) {
-		v3d_job_cleanup(&job->base);
-		kfree(clean_job);
-		return ret;
-	}
+	ret = v3d_job_init(v3d, file_priv, (void *)&clean_job, sizeof(*clean_job),
+			   v3d_job_free, 0, V3D_CACHE_CLEAN);
+	if (ret)
+		goto fail;
 
 	job->args = *args;
 
@@ -916,7 +885,7 @@ fail_unreserve:
 	drm_gem_unlock_reservations(clean_job->bo, clean_job->bo_count,
 				    &acquire_ctx);
 fail:
-	v3d_job_cleanup(&job->base);
+	v3d_job_cleanup(v3d_job_ptr(job));
 	v3d_job_cleanup(clean_job);
 
 	return ret;
